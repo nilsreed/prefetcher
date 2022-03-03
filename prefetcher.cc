@@ -22,9 +22,9 @@ typedef struct GHB_entry_t{
     int32_t*            delta_buffer_tail;
 } GHB_entry;
 
-GHB_entry* GHB; //Global History Buffer
-GHB_entry* GHB_head;
-GHB_entry* IT;  //Index table
+GHB_entry*  GHB; //Global History Buffer
+GHB_entry*  GHB_head;
+GHB_entry** IT;  //Index table
 
 int32_t** delta_buffers; //pointer to int arrays
 
@@ -40,16 +40,16 @@ uint32_t generate_czone_tag(uint64_t miss_address){
     return tag;
 }
 
-void deltabuffer_push(int32_t* deltabuffer_head, int32_t delta){ //add delta to top of czone specific deltabuffer
-    *deltabuffer_head = delta;
-    ++deltabuffer_head;
+void deltabuffer_push(int32_t* delta_buffer_head, int32_t delta){ //add delta to top of czone specific deltabuffer
+    *delta_buffer_head = delta;
+    ++delta_buffer_head;
 }
 
-void deltabuffer_remove(int32_t* deltabuffer_head, int32_t* deltabuffer_tail){ //remove delta from bottom of czone specific deltauffer    
-    if(deltabuffer_head != deltabuffer_tail){
-        memcpy(deltabuffer_tail, deltabuffer_tail + 1, (deltabuffer_head - deltabuffer_tail)*sizeof(int32_t));
-        --deltabuffer_head;
-        *deltabuffer_head = 0;
+void deltabuffer_remove(int32_t* delta_buffer_head, int32_t* delta_buffer_tail){ //remove delta from bottom of czone specific deltauffer    
+    if(delta_buffer_head != delta_buffer_tail){
+        memcpy(delta_buffer_tail, delta_buffer_tail + 1, (delta_buffer_head - delta_buffer_tail)*sizeof(int32_t));
+        --delta_buffer_head;
+        *delta_buffer_head = 0;
     }
 }
 
@@ -63,7 +63,7 @@ void GHB_insert(Addr a){
     uint32_t evict_address = generate_czone_tag(GHB_head->address);
     GHB_entry* entry_to_evict = IT[evict_address];
 
-    deltabuffer_remove(entry_to_evict.deltabuffer_head, entry_to_evict.deltabuffer_tail);
+    deltabuffer_remove(entry_to_evict->delta_buffer_head, entry_to_evict->delta_buffer_tail);
 
     if (entry_to_evict == GHB_head){
         IT[generate_czone_tag(GHB_head->address)] = NULL;
@@ -80,15 +80,15 @@ void GHB_insert(Addr a){
     if (prev_czone_access != NULL){
         GHB_head->next_instance = prev_czone_access;
         prev_czone_access->prev_instance = GHB_head;
-        GHB_head->deltabuffer_head = prev_czone_access.deltabuffer_head;
-        GHB_head->deltabuffer_tail = prev_czone_access.deltabuffer_tail;
+        GHB_head->delta_buffer_head = prev_czone_access->delta_buffer_head;
+        GHB_head->delta_buffer_tail = prev_czone_access->delta_buffer_tail;
         //TODO: insert delta calculator here
-        deltabuffer_push(GHB_head->deltabuffer_head, ptr->address - a)
+        deltabuffer_push(GHB_head->delta_buffer_head, prev_czone_access->address - a);
     } else {
         //Add addr to Index table
         GHB_head->next_instance = NULL;
-        GHB_head->deltabuffer_head = deltabuffers[czone_tag];
-        GHB_head->deltabuffer_tail = deltabuffers[czone_tag];
+        GHB_head->delta_buffer_head = delta_buffers[czone_tag];
+        GHB_head->delta_buffer_tail = delta_buffers[czone_tag];
     }
     IT[czone_tag] = GHB_head;
 }
@@ -116,13 +116,18 @@ CorrelationHit-kalkulator, som beskrevet i AC/DC. Hardkodet til correlation pair
 men gitt problemstillingen vår bør vi kanskje vurdere å utvide til triplets eller
 generisk/dynamisk størrelse
 */
-void calculate_correlation_hit(int32_t* deltabuffer_head, int32_t* deltabuffer_tail, int32_t* hit_p, int32_t* prefetch_start){
+void calculate_correlation_hit(int32_t* delta_buffer_head, int32_t* delta_buffer_tail, int32_t* hit_p, int32_t* prefetch_start){
     *hit_p = 0;
-    int32_t[2] key_register = {*(deltabuffer_head - 1), *deltabuffer_head}; //Correlation key register
+    int32_t key_register[2];
+    key_register[0] = *(delta_buffer_head - 1);
+    key_register[1] = *delta_buffer_head; //Correlation key register
         
-    int32_t* iterator = deltabuffer_head - 3;
-    int32_t[2] comparison_register = {iterator, iterator + 1};
-    while(iterator <= deltabuffer_tail){
+    int32_t* iterator = delta_buffer_head - 3;
+    int32_t comparison_register[2];
+    comparison_register[0] = *iterator;
+    comparison_register[1] = *(iterator + 1);
+
+    while(iterator <= delta_buffer_tail){
         
         //comparison_register[0] == key_register[0] && comparison_register[1] == key_register[1]
         if(!(memcmp(key_register, comparison_register, sizeof(key_register)))){
@@ -132,21 +137,22 @@ void calculate_correlation_hit(int32_t* deltabuffer_head, int32_t* deltabuffer_t
         }
         
         --iterator;
-        comparison_register = {iterator, iterator + 1};        
+        comparison_register[0] = *iterator;
+        comparison_register[1] = *(iterator + 1);        
     }
 
     //TODO, ikkje gjer nåke om der ikkje e nok prefetches!
 }
 
-void CDC_issue_prefetches(int32_t* pf_delta_start, int32_t* deltabuffer_head, int32_t* deltabuffer_tail, Addr pf_addr_start, uint32_t czone){
+void CDC_issue_prefetches(int32_t* pf_delta_start, int32_t* delta_buffer_head, int32_t* delta_buffer_tail, Addr pf_addr_start, uint32_t czone){
     Addr current_address = pf_addr_start;
     for(int i = 0; i < g_prefetch_degree; i++){
 
         if(!in_cache(current_address) && !in_mshr_queue(current_address)){
             issue_prefetch(current_address);
         }        
-        if(pf_delta_start+i >= deltabuffer_head){
-            pf_delta_start = deltabuffer_tail;
+        if(pf_delta_start+i >= delta_buffer_head){
+            pf_delta_start = delta_buffer_tail;
         }
         current_address += delta_buffers[czone][*pf_delta_start+i]; //??
     }
@@ -174,21 +180,27 @@ TODO:
     Prefetch addresses via interface function
 */
 void commit_prefetch(AccessStat stat){
-    if (stat.miss || (!stat.miss && get_prefetch_bit(stat.addr))){
-        if (get_prefetch_bit(stat.addr)){
-            clear_prefetch_bit(stat.addr);
+    if (stat.miss || (!stat.miss && get_prefetch_bit(stat.mem_addr))){
+        if (get_prefetch_bit(stat.mem_addr)){
+            clear_prefetch_bit(stat.mem_addr);
         }
         
         uint32_t czone_tag = generate_czone_tag(stat.mem_addr);
-        uint32_t* czone_ghb_head = IT[czone_tag];
         GHB_insert(stat.mem_addr); //updates IT, inserts into GHB, updates DB
         
-        int32_t* hit_p, pf_start;
-        *hit_p = 0;
+        int32_t* hit_p          = (int32_t*) malloc(sizeof(int32_t));
+        int32_t* pf_delta_start = (int32_t*) malloc(sizeof(int32_t));
+        *hit_p    = 0;
+        *pf_delta_start = 0;
 
-        calculate_correlation_hit(GHB_head.delta_buffer_head, GHB_head.delta_buffer_tail, hit_p, pf_start);
+        calculate_correlation_hit(GHB_head->delta_buffer_head, GHB_head->delta_buffer_tail, hit_p, pf_delta_start);
         
-        CDC_issue_prefetches(int32_t* pf_delta_start, int32_t* deltabuffer_head, int32_t* deltabuffer_tail, Addr pf_addr_start, czone_tag);
+        if(*hit_p){
+            CDC_issue_prefetches(pf_delta_start, GHB_head->delta_buffer_head, GHB_head->delta_buffer_tail, GHB_head->address, czone_tag);
+        }
+
+        free(hit_p);
+        free(pf_delta_start);
     }
 }
 
@@ -196,13 +208,13 @@ void prefetch_init(void)
 {
     /* Called before any calls to prefetch_access. */
     /* This is the place to initialize data structures. */
-    GHB = GHB_entry[GHB_SIZE];
+    GHB = (GHB_entry*) malloc(sizeof(GHB_entry)*GHB_SIZE);
     for (int i = 0; i < GHB_SIZE; i++){
         GHB[i].prev_instance = NULL;
         GHB[i].next_instance = NULL;
     };
 
-    IT  = (GHB_entry*) malloc(sizeof(GHB_entry*)*(MAX_PHYS_MEM_ADDR + 1)/(g_czone_size));
+    IT  = (GHB_entry**) malloc(sizeof(GHB_entry*)*(MAX_PHYS_MEM_ADDR + 1)/(g_czone_size));
     g_czone_bits = num_bits_2p((MAX_PHYS_MEM_ADDR + 1)/(g_czone_size));
     
     //DPRINTF(HWPrefetch, "Initialized sequential-on-access prefetcher\n");
