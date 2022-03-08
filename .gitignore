@@ -2,3 +2,4 @@
 !interface.hh
 !prefetcher.cc
 !.gitignore
+!data/*
