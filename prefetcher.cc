@@ -24,19 +24,17 @@ typedef struct GHB_entry_t{
     Addr                address;
     struct GHB_entry_t* next_instance; // Next in the linked list of accesses w/ in same CZone
     struct GHB_entry_t* prev_instance; // Prev in the linked list of accesses w/ in same CZone
-    int32_t*            delta_buffer_head;
-    int32_t*            delta_buffer_tail;
 } GHB_entry;
 
 GHB_entry   GHB[GHB_SIZE]; //Global History Buffer
 GHB_entry*  GHB_head;
 GHB_entry*  IT[NUM_CZONES];  //Index table
 
-int32_t delta_buffers[NUM_CZONES*(GHB_SIZE + 1)]; //pointer to int arrays
+int32_t delta_buffers[NUM_CZONES*(GHB_SIZE + 1)]; // pointer to int arrays
+int32_t* delta_buffer_heads[NUM_CZONES];           // pointers to the heads of the delta buffers
 
 int is_NULL(GHB_entry* entry){
-    return (entry->next_instance == NULL) && (entry->prev_instance == NULL) 
-        && (entry->delta_buffer_head == NULL) && (entry->delta_buffer_tail == NULL);
+    return (entry->next_instance == NULL) && (entry->prev_instance == NULL);        
 }
 
 uint32_t generate_czone_tag(uint64_t miss_address){
@@ -44,16 +42,17 @@ uint32_t generate_czone_tag(uint64_t miss_address){
     return tag;
 }
 
-void deltabuffer_push(GHB_entry* entry, int32_t delta){ //add delta to top of czone specific deltabuffer
-    *(entry->delta_buffer_head) = delta;
-    ++(entry->delta_buffer_head);
+void deltabuffer_push(uint32_t czone_tag, int32_t delta){ //add delta to top of czone specific deltabuffer
+    *(delta_buffer_heads[czone_tag]) = delta;
+    ++delta_buffer_heads[czone_tag];
 }
 
-void deltabuffer_remove(GHB_entry* entry){ //remove delta from bottom of czone specific deltauffer    
-    if(entry->delta_buffer_head != entry->delta_buffer_tail){
-        memcpy(entry->delta_buffer_tail, entry->delta_buffer_tail + 1, (entry->delta_buffer_head - entry->delta_buffer_tail)*sizeof(int32_t));
-        --(entry->delta_buffer_head);
-        *(entry->delta_buffer_head) = 0;
+void deltabuffer_remove(uint32_t czone_tag){ //remove delta from bottom of czone specific deltabuffer
+    if (delta_buffer_heads[czone_tag] != &delta_buffers[czone_tag*GHB_SIZE]){
+        memcpy(&delta_buffers[czone_tag*GHB_SIZE], &delta_buffers[czone_tag*GHB_SIZE] + 1, 
+                (delta_buffer_heads[czone_tag] - &delta_buffers[czone_tag*GHB_SIZE])*sizeof(int32_t));
+        --(delta_buffer_heads[czone_tag]);
+        *(delta_buffer_heads[czone_tag])  = 0;
     }
 }
 
@@ -76,15 +75,15 @@ void GHB_insert(Addr a){
     //om IT peika på det elementet som skal ut
     
     if (!is_NULL(GHB_head)){
-        uint32_t evict_address = generate_czone_tag(GHB_head->address);
-        GHB_entry* entry_to_evict = IT[evict_address];
+        uint32_t evict_tag = generate_czone_tag(GHB_head->address);
+        GHB_entry* entry_to_evict = IT[evict_tag];
         
         if (entry_to_evict != NULL){
-            deltabuffer_remove(entry_to_evict);
+            deltabuffer_remove(evict_tag);
         }
 
         if (entry_to_evict == GHB_head){
-            IT[evict_address] = NULL;
+            IT[evict_tag] = NULL;
         }
     }
 
@@ -99,15 +98,13 @@ void GHB_insert(Addr a){
     if (prev_czone_access != NULL){
         GHB_head->next_instance = prev_czone_access;
         prev_czone_access->prev_instance = GHB_head;
-        GHB_head->delta_buffer_head = prev_czone_access->delta_buffer_head;
-        GHB_head->delta_buffer_tail = prev_czone_access->delta_buffer_tail;
         //TODO: insert delta calculator here
-        deltabuffer_push(GHB_head, (int32_t)prev_czone_access->address - (int32_t)a);
+        deltabuffer_push(czone_tag, (int32_t)prev_czone_access->address - (int32_t)a);
     } else {
         //Add addr to Index table
         GHB_head->next_instance = NULL;
-        GHB_head->delta_buffer_head = delta_buffers + czone_tag*GHB_SIZE;
-        GHB_head->delta_buffer_tail = delta_buffers + czone_tag*GHB_SIZE;
+
+        delta_buffer_heads[czone_tag] = &delta_buffers[czone_tag*GHB_SIZE];
     }
     IT[czone_tag] = GHB_head;
 }
@@ -121,10 +118,10 @@ generisk/dynamisk størrelse
 void calculate_correlation_hit(int32_t* delta_buffer_head, int32_t* delta_buffer_tail, int32_t* hit_p, int32_t* prefetch_start){
     *hit_p = 0;
     int32_t key_register[2];
-    key_register[0] = *(delta_buffer_head - 1);
-    key_register[1] = *delta_buffer_head; //Correlation key register
+    key_register[0] = *(delta_buffer_head - 2);
+    key_register[1] = *(delta_buffer_head - 1); //Correlation key register
         
-    int32_t* iterator = delta_buffer_head - 3;
+    int32_t* iterator = delta_buffer_head - 4;
     if (iterator <= delta_buffer_tail){
         return;
     }
@@ -134,9 +131,8 @@ void calculate_correlation_hit(int32_t* delta_buffer_head, int32_t* delta_buffer
     comparison_register[1] = *(iterator + 1);
 
     while(iterator >= delta_buffer_tail){
-        
-        //comparison_register[0] == key_register[0] && comparison_register[1] == key_register[1]
-        if(!(memcmp(key_register, comparison_register, sizeof(key_register)))){
+        //!(memcmp(key_register, comparison_register, sizeof(key_register)))
+        if(comparison_register[0] == key_register[0] && comparison_register[1] == key_register[1]){
             *hit_p = 1;
             prefetch_start = iterator + 2;
             return;
@@ -200,10 +196,12 @@ void commit_prefetch(AccessStat stat){
         hit_p    = &hit;
         pf_delta_start = &pf_d_start;
 
-        calculate_correlation_hit(GHB_head->delta_buffer_head, GHB_head->delta_buffer_tail, hit_p, pf_delta_start);
+        uint32_t czone_tag = generate_czone_tag(stat.mem_addr);
+
+        calculate_correlation_hit(delta_buffer_heads[czone_tag], &delta_buffers[czone_tag*GHB_SIZE], hit_p, pf_delta_start);
         
         if(*hit_p){
-            CDC_issue_prefetches(pf_delta_start, GHB_head->delta_buffer_head, GHB_head->delta_buffer_tail, GHB_head->address);
+            CDC_issue_prefetches(pf_delta_start, delta_buffer_heads[czone_tag], &delta_buffers[czone_tag*GHB_SIZE], GHB_head->address);
         }
     }
 }
@@ -216,14 +214,13 @@ void prefetch_init(void)
     for (int i = 0; i < GHB_SIZE; i++){
         GHB[i].prev_instance = NULL;
         GHB[i].next_instance = NULL;
-        GHB[i].delta_buffer_head = NULL;
-        GHB[i].delta_buffer_tail = NULL;
     };
 
     GHB_head = GHB;
 
     for (int i = 0; i < NUM_CZONES; i++){
         IT[i] = NULL;
+        delta_buffer_heads[i] = &delta_buffers[i*GHB_SIZE];
     }
 
     //IT  = (GHB_entry**) malloc(sizeof(GHB_entry*)*NUM_CZONES);
