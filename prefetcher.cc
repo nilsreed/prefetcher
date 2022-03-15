@@ -16,7 +16,7 @@
 #define GHB_SIZE        256
 #define MAX_ADDR_BITS   28            // log2 of MAX_PHYS_MEM_ADDR + 1
 #define CZONE_SIZE      64*1024
-#define CZONE_BITS      16
+#define CZONE_BITS      12            // log2 of NUM_CZONES
 #define PREFETCH_DEGREE 2
 #define NUM_CZONES      (MAX_PHYS_MEM_ADDR + 1)/(CZONE_SIZE)
 
@@ -34,6 +34,10 @@ GHB_entry*  IT[NUM_CZONES];  //Index table
 
 int32_t delta_buffers[NUM_CZONES*(GHB_SIZE + 1)]; //pointer to int arrays
 
+int is_NULL(GHB_entry* entry){
+    return (entry->next_instance == NULL) && (entry->prev_instance == NULL) 
+        && (entry->delta_buffer_head == NULL) && (entry->delta_buffer_tail == NULL);
+}
 
 uint32_t generate_czone_tag(uint64_t miss_address){
     uint32_t tag = (uint32_t) (miss_address >> (MAX_ADDR_BITS - CZONE_BITS));
@@ -53,25 +57,35 @@ void deltabuffer_remove(GHB_entry* entry){ //remove delta from bottom of czone s
     }
 }
 
-
+//int foo = 0;
 void GHB_insert(Addr a){
     //TODO: Verify
     //GHB_head = GHB + ((sizeof(GHB_head) + 1) % GHB_SIZE);
     ++GHB_head;
-    if (GHB_head > GHB + GHB_SIZE){
+    //GHB_head->address       = a;
+    //foo++;
+    
+    /*
+    if (GHB_head > GHB + (GHB_SIZE-1)*sizeof(GHB_entry)){
         GHB_head = GHB;
-    } 
+    } */
+
+    if (GHB_head > &GHB[GHB_SIZE-1]){
+        GHB_head = GHB;
+    }
     //om IT peika på det elementet som skal ut
     
-    uint32_t evict_address = generate_czone_tag(GHB_head->address);
-    GHB_entry* entry_to_evict = IT[evict_address];
-    
-    if (entry_to_evict != NULL){
-        deltabuffer_remove(entry_to_evict);
-    }
+    if (!is_NULL(GHB_head)){
+        uint32_t evict_address = generate_czone_tag(GHB_head->address);
+        GHB_entry* entry_to_evict = IT[evict_address];
+        
+        if (entry_to_evict != NULL){
+            deltabuffer_remove(entry_to_evict);
+        }
 
-    if (entry_to_evict == GHB_head){
-        IT[generate_czone_tag(GHB_head->address)] = NULL;
+        if (entry_to_evict == GHB_head){
+            IT[evict_address] = NULL;
+        }
     }
 
     GHB_head->address       = a;
@@ -202,6 +216,8 @@ void prefetch_init(void)
     for (int i = 0; i < GHB_SIZE; i++){
         GHB[i].prev_instance = NULL;
         GHB[i].next_instance = NULL;
+        GHB[i].delta_buffer_head = NULL;
+        GHB[i].delta_buffer_tail = NULL;
     };
 
     GHB_head = GHB;
