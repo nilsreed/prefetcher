@@ -22,7 +22,7 @@ GHB_entry   GHB[GHB_SIZE];   // Global History Buffer
 GHB_entry*  GHB_head;        // Current head of the GHB
 GHB_entry*  IT[NUM_CZONES];  // Index table
 
-int32_t delta_buffers[NUM_CZONES*(GHB_SIZE + 1)];  // Delta buffers for all CZones. It is more than NUM_CZONES times bigger than it needs to to keep clutterin in memory to a minimum
+int32_t delta_buffers[NUM_CZONES*(GHB_SIZE + 1)];  // Delta buffers for all CZones. It is more than NUM_CZONES times bigger than it needs to to keep cluttering in memory to a minimum
 int32_t* delta_buffer_heads[NUM_CZONES];           // Pointers to the heads of the delta buffers
 
 /**
