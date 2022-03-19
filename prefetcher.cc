@@ -4,11 +4,11 @@
 #include <stdint.h>
 
 
-#define GHB_SIZE        256                                     // Number of entries in the GHB
+#define GHB_SIZE        128                                     // Number of entries in the GHB
 #define MAX_ADDR_BITS   28                                      // log2 of MAX_PHYS_MEM_ADDR + 1
 #define CZONE_SIZE      64*1024                                 // Number of bytes in each CZone
 #define CZONE_BITS      12                                      // log2 of NUM_CZONES
-#define PREFETCH_DEGREE 4                                       // Number of prefeches generated on a correlation hit
+#define PREFETCH_DEGREE 2                                       // Number of prefeches generated on a correlation hit
 #define NUM_CZONES      (MAX_PHYS_MEM_ADDR + 1)/(CZONE_SIZE)    // Number of CZones
 
 
