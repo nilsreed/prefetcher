@@ -4,11 +4,11 @@
 #include <stdint.h>
 
 
-#define GHB_SIZE        128                                     // Number of entries in the GHB
+#define GHB_SIZE        512                                     // Number of entries in the GHB, varied in the experimentation
 #define MAX_ADDR_BITS   28                                      // log2 of MAX_PHYS_MEM_ADDR + 1
 #define CZONE_SIZE      64*1024                                 // Number of bytes in each CZone
 #define CZONE_BITS      12                                      // log2 of NUM_CZONES
-#define PREFETCH_DEGREE 2                                       // Number of prefeches generated on a correlation hit
+#define PREFETCH_DEGREE 16                                       // Number of prefeches generated on a correlation hit, varied in the experimentation
 #define NUM_CZONES      (MAX_PHYS_MEM_ADDR + 1)/(CZONE_SIZE)    // Number of CZones
 
 
@@ -158,7 +158,7 @@ void CDC_issue_prefetches(int32_t* pf_delta_start, int32_t* delta_buffer_head, i
 
     for(int i = 0; i < PREFETCH_DEGREE; i++){
 
-        if(!in_cache(current_address) && !in_mshr_queue(current_address)){
+        if(!in_cache(current_address) && !in_mshr_queue(current_address) && (current_address <= MAX_PHYS_MEM_ADDR)){
             issue_prefetch(current_address);
         }        
         if(local_pf_delta_start + it >= delta_buffer_head){
