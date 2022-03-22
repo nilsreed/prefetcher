@@ -1,8 +1,6 @@
 close all;
 clear all;
 
-%load('colorblind_colormap.mat');
-%colormap(colorblind); % Sett etter figuren e laga.
 data = {};
 data{1}  = load('data\agg_2_siz_128\cleaned.txt');
 data{2}  = load('data\agg_2_siz_256\cleaned.txt');
@@ -39,22 +37,48 @@ for k=1:12
     end
 end
 
-harm_means = zeros(4,4);
-for i=1:4
+speed = 1;
+acc   = 2;
+cov   = 3;
+means = zeros(4,4,3);
+for i=1:4   
     for j=1:4
-        harm_means(i,j) = harmmean(speedups(i,j,:));
+        means(i,j,speed) = harmmean(speedups(i,j,:));
+        means(i,j,acc)   = mean(accuracies(i,j,:));
+        means(i,j,cov)   = mean(coverages(i,j,:));
     end
 end
 
 figure;
-surf(x,y,harm_means);
+surf(x,y,means(:,:,speed));
 xticks(x);
 yticks(y);
-title("Harmonic means of speedups");
 xlabel("Prefetch degree");
 ylabel("GHB Size");
 zlabel("Speedup relative to no prefetching");
 
 figure;
-bar(reshape(speedups(1,:,:),[4,12]).')
-xticklabels(names)
+surf(x,y,means(:,:,acc));
+xticks(x);
+yticks(y);
+xlabel("Prefetch degree");
+ylabel("GHB Size");
+zlabel("Prefetcher accuracy");
+
+figure;
+surf(x,y,means(:,:,cov));
+xticks(x);
+yticks(y);
+xlabel("Prefetch degree");
+ylabel("GHB Size");
+zlabel("Coverage");
+
+figure;
+d = [reshape(speedups(1,:,:),[4,12]).', data{1,17}(:,2)];
+b = bar(d, 'hist');
+xticklabels(names);
+yline(1);
+axis([-inf inf 0.5 1.2]);
+ylabel("Speedup relative to no prefetching");
+legend('GHB size 128', 'GHB size 256', 'GHB size 512', 'GHB size 1024', 'Example prefetcher');
+grid on;
